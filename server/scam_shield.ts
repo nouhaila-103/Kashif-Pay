@@ -161,9 +161,7 @@ Output valid JSON with the exact structure:
     ],
     images: [{ mimeType, base64Data: cleanBase64 }],
     jsonSchema: true,
-    temperature: 0.1,
-    timeoutMs: 6000,
-    maxOutputTokens: 600,
+    timeoutMs: 18000,
     minimalThinking: true,
   });
 
@@ -383,10 +381,8 @@ Return ONLY valid JSON matching this schema:
         },
       ],
       jsonSchema: true,
-      temperature: 0.1,
-      timeoutMs: 6000, // 6s strict timeout for responsive Scam Shield checks
-      maxOutputTokens: 800, // Low max tokens to avoid verbose reasoning latency
-      minimalThinking: true, // Minimal thinking to avoid 20s+ latency
+      timeoutMs: 15000, // 15s timeout: ample time for Gemini without hanging
+      minimalThinking: true, // Use minimal/low thinking to minimize latency
     });
 
     llmResult = response.parsedJson;

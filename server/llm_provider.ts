@@ -38,10 +38,10 @@ async function callGemini(params: CallLLMParams): Promise<{ content: string; mod
     throw new Error('GEMINI_API_KEY is not configured');
   }
 
-  // Prioritize gemini-3.1-flash-lite: has active separate quota, sub-3s latency, and no thinking overhead
+  const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
   const candidateModels = [
+    primaryModel,
     'gemini-3.1-flash-lite',
-    process.env.GEMINI_MODEL || 'gemini-3.8-flash',
     'gemini-flash-latest',
   ];
 
@@ -96,20 +96,21 @@ async function callGemini(params: CallLLMParams): Promise<{ content: string; mod
   }
 
   let lastGeminiError: any = null;
-  // Dedicated per-model candidate timeout (default 12s, or specified timeoutMs)
-  const perModelTimeoutMs = params.timeoutMs || 12000;
+  // Dedicated per-model candidate timeout (default 15s, or requested timeoutMs)
+  const perModelTimeoutMs = Math.max(params.timeoutMs || 15000, 12000);
 
   for (const m of uniqueModels) {
     try {
       const config: any = {};
-      // For gemini-3 series, control thinking overhead
-      if (params.minimalThinking) {
-        config.thinkingConfig = { thinkingBudget: 0 };
-      } else if (m.includes('3') && !m.includes('lite')) {
+      // Configure thinkingLevel according to @google/genai guidelines
+      if (m.includes('lite')) {
+        config.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+      } else if (m.includes('3') || m.includes('4')) {
+        // Use ThinkingLevel.LOW to minimize latency without invalid thinkingBudget
         config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
       }
       if (params.maxOutputTokens) {
-        config.maxOutputTokens = params.maxOutputTokens;
+        config.maxOutputTokens = Math.max(params.maxOutputTokens, 2048);
       }
       if (systemInstruction) {
         config.systemInstruction = systemInstruction;
@@ -117,7 +118,7 @@ async function callGemini(params: CallLLMParams): Promise<{ content: string; mod
       if (params.jsonSchema) {
         config.responseMimeType = 'application/json';
       }
-      if (typeof params.temperature === 'number') {
+      if (typeof params.temperature === 'number' && !m.includes('3.8') && !m.includes('4')) {
         config.temperature = params.temperature;
       }
 
@@ -323,7 +324,7 @@ export function getProviderPriority(): string[] {
  */
 export async function call_llm(params: CallLLMParams): Promise<CallLLMResult> {
   const priority = getProviderPriority();
-  const timeoutMs = params.timeoutMs ?? 20000;
+  const timeoutMs = Math.max(params.timeoutMs ?? 20000, 15000);
   const startTime = performance.now();
 
   const attemptedChain: string[] = [];
@@ -361,7 +362,9 @@ export async function call_llm(params: CallLLMParams): Promise<CallLLMResult> {
         throw new Error(`Unknown provider: ${provider}`);
       }
 
-      const { content, model, tokens } = await withTimeout(callPromise, timeoutMs, `${provider} call`);
+      // Add a grace window so per-model timeouts and fallbacks inside callGemini can complete
+      const providerTimeoutMs = timeoutMs + 2500;
+      const { content, model, tokens } = await withTimeout(callPromise, providerTimeoutMs, `${provider} call`);
       const providerDuration = Math.round(performance.now() - providerStartTime);
       const totalDuration = Math.round(performance.now() - startTime);
 
